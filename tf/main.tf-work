@@ -1,0 +1,65 @@
+provider "aws" {
+  region = "${var.region}"
+}
+
+module "network" {
+  source = "modules/network"
+  aws_region = "${var.region}"
+  environment = "${var.environment}"
+  public_key_path = "${var.public_key_path}"
+  key_name = "${var.key_name}"
+}
+
+module "bastion" {
+  source = "modules/bastion"
+  aws_region = "${var.region}"
+  environment = "${var.environment}"
+  domain_name = "${module.network.aws_domain_name}"
+  vpc_id = "${module.network.vpc_id}"
+  vpc_cidr = "${module.network.vpc_cidr}"
+  subnet_id = "${element(split(",", module.network.public_subnet_ids), 0)}"
+  availability_zone = "${element(split(",", module.network.availibilty_zones), 0)}"
+  key_name = "${module.network.key_name}"
+  route53_zone_id = "${module.network.route53_zone_id}"
+}
+output "bastion_public_ip" {value = "${module.bastion.public_ip}"}
+output "bastion_username"  {value = "${module.bastion.username}"}
+
+module "frontend" {
+  source = "modules/frontend"
+  aws_region = "${var.region}"
+  environment = "${var.environment}"
+  domain_name = "${module.network.domain_name}"
+  vpc_id = "${module.network.vpc_id}"
+  vpc_cidr = "${module.network.vpc_cidr}"
+  subnet_id = "${element(split(",", module.network.public_subnet_ids), 0)}"
+  availability_zone = "${element(split(",", module.network.availibilty_zones), 0)}"
+  key_name = "${module.network.key_name}"
+  route53_zone_id = "${module.network.route53_zone_id}"
+}
+output "frontend_public_ip" {value = "${module.frontend.public_ip}"}
+output "frontend_username"  {value = "${module.frontend.username}"}
+
+module "managers" {
+  source = "modules/managers"
+  region = "${var.region}"
+  environment = "${var.environment}"
+  domain_name = "${module.network.domain_name}"
+  vpc_id = "${module.network.vpc_id}"
+  vpc_cidr = "${module.network.vpc_cidr}"
+  subnet_ids = "${module.network.private_subnet_ids}"
+  availability_zones = "${module.network.availibilty_zones}"
+  key_name = "${module.network.key_name}"
+}
+
+module "workers" {
+  source = "modules/workers"
+  region = "${var.region}"
+  environment = "${var.environment}"
+  domain_name = "${module.network.domain_name}"
+  vpc_id = "${module.network.vpc_id}"
+  vpc_cidr = "${module.network.vpc_cidr}"
+  subnet_ids = "${module.network.private_subnet_ids}"
+  availability_zones = "${module.network.availibilty_zones}"
+  key_name = "${module.network.key_name}"
+}

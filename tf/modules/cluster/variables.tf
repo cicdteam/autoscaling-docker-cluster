@@ -1,0 +1,11 @@
+variable "region" {}
+variable "key_name" {}
+variable "instance_type" {}
+variable "subnet_ids" {}
+variable "availability_zones" {}
+variable "security_group_ids" {}
+variable "name" {}
+variable "user_data" {}
+variable "route53_zone_id" {}
+variable "cluster_min" {}
+variable "cluster_max" {}
