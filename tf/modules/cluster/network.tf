@@ -1,4 +1,4 @@
-resource "aws_security_group" "managers" {
+resource "aws_security_group" "cluster" {
   name        = "${var.name}-sg"
   vpc_id      = "${var.vpc_id}"
   description = "${var.name} security group"

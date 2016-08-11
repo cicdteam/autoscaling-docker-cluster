@@ -17,13 +17,13 @@ resource "aws_launch_configuration" "cluster" {
 }
 
 resource "aws_autoscaling_group" "cluster" {
-    depends_on = ["aws_launch_configuration.cluster"]
-    name = "${var.name}"
+    depends_on           = ["aws_launch_configuration.cluster"]
+    name                 = "${var.name}"
     launch_configuration = "${aws_launch_configuration.cluster.name}"
-    min_size = "${var.cluster_min}"
-    max_size = "${var.cluster_max}"
-    desired_capacity = "${var.cluster_min}"
-    vpc_zone_identifier = ["${split(",", var.subnet_ids)}"]
+    min_size             = "${var.cluster_min}"
+    max_size             = "${var.cluster_max}"
+    desired_capacity     = "${var.cluster_min}"
+    vpc_zone_identifier  = ["${split(",", var.subnet_ids)}"]
     termination_policies = ["OldestInstance"]
     tag {
       key = "Name"

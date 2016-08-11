@@ -60,20 +60,19 @@ resource "aws_iam_role_policy" "cluster" {
                 "sqs:DeleteMessage"
             ],
             "Resource": "${aws_sqs_queue.cluster.arn}"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "ec2:CreateTags",
+            "Resource": "*"
         }
    ]
 }
 EOF
 }
 
-
-
-
-
-
-
 #
-# Autoscale Group IAM reated stuff
+# Autoscaling Group IAM related stuff
 #
 resource "aws_iam_role" "asg" {
     name = "${var.name}-asgrole"

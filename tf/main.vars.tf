@@ -1,9 +1,7 @@
-variable "name" {
-  description = "General name"
-}
-variable "region" {
-  description = "EC2 Region for the VPC"
-}
-variable "public_key_path" {
-  description = "Path to onsite public ssh key"
-}
+variable "name" {}
+variable "region" {}
+variable "public_key_path" {}
+
+variable "cluster_size_min" {}
+variable "cluster_size_max" {}
+variable "cluster_instance_type" {}

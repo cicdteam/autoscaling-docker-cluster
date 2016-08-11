@@ -3,13 +3,19 @@
 # General name for resources
 name=${NAME:-cluster}
 
+# Size (min, max) of cluster
+minsize=$2
+maxsize=$3
+if [ -z $minsize ]; then minsize=3; fi
+if [ -z $maxsize ]; then maxsize=$minsize; fi
+
 # AWS S3 bucket to store terraform state files
 bucket=${S3BUCKET:-pure-ci}
 # AWS S3 bucket's region
 region=${S3REGION:-eu-west-1}
 
 usage () {
-    echo; echo "Usage: $0 <prod|test> [extra terraform opts]"; echo
+    echo; echo "Usage: $0 <prod|test> [min_size [max_size]]"; echo
 }
 
 die () {
@@ -28,8 +34,6 @@ if [ -z  $AWS_ACCESS_KEY_ID ];     then die "Please specify AWS credentials - AW
 if [ -z  $AWS_SECRET_ACCESS_KEY ]; then die "Please specify AWS credentials - AWS_SECRET_ACCESS_KEY variable empty"; fi
 
 goal=$1
-shift 1
-extraopts=$*
 exitcode=0
 curdir=$(pwd)
 
@@ -54,7 +58,7 @@ if [ $exitcode -ne 0 ]; then die "terraform can't sync remote state"; fi
 
 # Apply changes
 terraform get ../../tf || exitcode=$?
-terraform apply $extraopts ../../tf || exitcode=$?
+terraform apply -var "cluster_size_min=\"$minsize\"" -var "cluster_size_max=\"$maxsize\"" ../../tf || exitcode=$?
 terraform remote push || exitcode=$?
 
 if [ $exitcode -ne 0 ]; then die "terraform got error wile apply changes"; fi

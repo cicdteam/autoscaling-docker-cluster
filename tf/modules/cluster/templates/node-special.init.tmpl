@@ -1,0 +1,184 @@
+#!/bin/bash
+
+#
+# Update Ubuntu and install usefull packages
+#
+apt-get -qq update >/dev/null 2>&1
+apt-get -qq install jq rand python-pip unzip >/dev/null 2>&1
+pip install --upgrade awscli >/dev/null 2>&1
+
+#
+# Change instance's dns records in Route53 zone
+#
+ip=$(curl -sSL http://169.254.169.254/latest/meta-data/local-ipv4)
+idx=0; myhost="${hostname}$idx"; myfull="$myhost.${domain}"
+cat >/tmp/record <<EOF
+{
+  "Changes": [
+    {
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "$myfull",
+        "Type": "A",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "$ip"
+          }
+        ]
+      }
+    }
+  ]
+}
+EOF
+while ! aws route53 change-resource-record-sets --hosted-zone-id ${route53_zone_id} --change-batch file:///tmp/record
+do
+idx=$(expr $idx + 1); myhost="${hostname}$idx"; myfull="$myhost.${domain}"
+cat >/tmp/record <<EOF
+{
+  "Changes": [
+    {
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "$myfull",
+        "Type": "A",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "$ip"
+          }
+        ]
+      }
+    }
+  ]
+}
+EOF
+done
+rm -f /tmp/record
+echo $myhost | tee /etc/hostname
+echo "127.0.0.1 $myfull $myhost" | tee -a /etc/hosts
+hostname $myhost
+
+#
+# Install Docker Engine
+#
+curl -sSL https://get.docker.com | sh >/dev/null 2>&1 || echo "problem with docker"
+usermod -aG docker ubuntu
+
+#
+# Install HashiCorp's Consul and bootstrap cluster
+#
+if [ $idx -eq 0 ]
+  then joinstring="-bootstrap"
+  else joinstring="-retry-join=${hostname}0.${domain}"
+fi
+docker pull consul >/dev/null 2>&1
+docker run \
+  -d \
+  --net=host \
+  --name=consul \
+  -e 'CONSUL_LOCAL_CONFIG={"skip_leave_on_interrupt": true}' \
+  consul agent \
+    -server \
+    -bind=$ip \
+    -dc=${region} \
+    $joinstring
+
+#
+# Install Hashicorp's Nomad and bootstrap cluster with Consul as discovery backend
+#
+curl -sSL https://releases.hashicorp.com/nomad/0.4.0/nomad_0.4.0_linux_amd64.zip -o nomad.zip \
+  && unzip nomad.zip -d /usr/local/bin \
+  && rm -f nomad.zip
+mkdir -p /etc/nomad/data
+mkdir -p /etc/nomad/config
+cat >/etc/nomad/config/server.json <<EOF
+{
+    "server_service_name": "nomad",
+    "server_auto_join": true,
+    "client_service_name": "nomad-client",
+    "client_auto_join": true
+}
+EOF
+docker pull pure/nomad >/dev/null 2>&1
+docker run \
+  -d \
+  --net=host \
+  --name=nomad \
+  -v /etc/nomad/data:/nomad/data \
+  -v /etc/nomad/config:/nomad/config \
+  pure/nomad agent \
+    -server \
+    -bind=$ip \
+    -dc=${region}
+
+#########################################################################################
+#                                 node drain part                                       #
+#########################################################################################
+#                                                                                       #
+#                                                                                       #
+# Create and run node drain script for graceful shutdown on scale in action             #
+#                                                                                       #
+# /usr/local/bin/nodedrain                                                              #
+#                                                                                       #
+# What script doing:                                                                   #
+#   1. Check AWS SQS Queue for messages from Autoscale Group                            #
+#   2. On message EC2_INSTANCE_TERMINATING for current instance perform:                                         #
+#     2.1. Delete dns record in AWS Route53 zone                                        #
+#   3. Complete scale in action                                                         #
+#                                                                                       #
+#########################################################################################
+cat >/usr/local/bin/nodedrain <<EOF
+#!/bin/bash
+
+export AWS_DEFAULT_REGION=${region}
+export PATH="/usr/local/bin:\$PATH"
+
+dnsdel () {
+  cat >/tmp/record <<EOT
+{
+  "Changes": [
+    {
+      "Action": "DELETE",
+      "ResourceRecordSet": {
+        "Name": "$(hostname -f)",
+        "Type": "A",
+        "TTL": 60,
+        "ResourceRecords": [
+          {
+            "Value": "$(curl -sSL http://169.254.169.254/latest/meta-data/local-ipv4)"
+          }
+        ]
+      }
+    }
+  ]
+}
+EOT
+  aws route53 change-resource-record-sets --hosted-zone-id ${route53_zone_id} --change-batch file:///tmp/record >>/dev/null 2>&1
+  rm -f /tmp/record
+}
+
+me=$(curl -sSL http://169.254.169.254/latest/meta-data/instance-id)
+qurl=\$(aws sqs get-queue-url --queue-name ${queue} | jq '.QueueUrl' | sed 's/^"//; s/"$//')
+
+while true; do
+  sleep \$(rand --max 10)
+  message=\$(aws sqs receive-message --queue-url \$qurl)
+  receipt=\$(echo \$message | jq '.Messages[] | .ReceiptHandle' | sed 's/^"//; s/"$//')
+  body=\$(echo \$message | jq '.Messages[] | .Body' | sed 's/^"//; s/"$//' | tr -d '\')
+  if [ -z "\$body" ]; then continue; fi
+
+  instance=\$(echo \$body | jq '.EC2InstanceId' | sed 's/^"//; s/"$//')
+  transition=\$(echo \$body | jq '.LifecycleTransition' | sed 's/^"//; s/"$//')
+
+  if [ \$transition == 'autoscaling:EC2_INSTANCE_TERMINATING' -a \$instance == \$me ]
+    then
+      aws sqs delete-message --queue-url \$qurl --receipt-handle \$receipt >/dev/null 2>&1
+      dnsdel
+      aws autoscaling complete-lifecycle-action --lifecycle-hook-name ${hookname} --auto-scaling-group-name ${asgname} --lifecycle-action-result "CONTINUE" --instance-id \$me
+  fi
+done
+EOF
+
+chmod 0755 /usr/local/bin/nodedrain
+echo "* * * * * if [ -z \$(ps -ef | grep nodedrain | grep -v grep | awk '{print \$2}') ]; then sh -c 'nohup /usr/local/bin/nodedrain &' ; fi" | crontab
