@@ -1,12 +1,11 @@
 #!/bin/bash
 
-# General name for resources
-name=${NAME:-cluster}
-
 # AWS S3 bucket to store terraform state files
 bucket=${S3BUCKET:-pure-ci}
 # AWS S3 bucket's region
 region=${S3REGION:-eu-west-1}
+# Base name tfstate file
+name=dockercloud_cluster
 
 usage () {
     echo
@@ -24,20 +23,21 @@ die () {
 if [ $# -eq 0 ]; then usage; exit 1; fi
 
 case "$1" in
-    prod) stage="snaprapid-prod" ;;
+    prod) stage="prod" ;;
     test) stage="test" ;;
     *) usage && die "Unknow argument!" ;;
 esac
 
-if [ -z  $AWS_ACCESS_KEY_ID ];     then die "Please specify AWS credentials - AWS_ACCESS_KEY_ID variable empty"; fi
-if [ -z  $AWS_SECRET_ACCESS_KEY ]; then die "Please specify AWS credentials - AWS_SECRET_ACCESS_KEY variable empty"; fi
+if [ -z $AWS_ACCESS_KEY_ID ];     then die "Please specify AWS credentials - AWS_ACCESS_KEY_ID variable empty"; fi
+if [ -z $AWS_SECRET_ACCESS_KEY ]; then die "Please specify AWS credentials - AWS_SECRET_ACCESS_KEY variable empty"; fi
+if [ -z $DOCKER_USERNAME ];       then die "Please specify Docker credential - DOCKER_USERNAME variable empty"; fi
+if [ -z $DOCKER_PASSWORD ];       then die "Please specify Docker credential - DOCKER_PASSWORD variable empty"; fi
 
 goal=$1
 shift 1
 extraopts=$*
 exitcode=0
 curdir=$(pwd)
-if [ $stage = "snaprapid-prod" ]; then hstname=${name}; else hstname="${stage}-${name}"; fi
 
 cd config/$goal
 
@@ -60,6 +60,20 @@ fi
 if [ $exitcode -ne 0 ]; then die "terraform can't sync remote state"; fi
 
 terraform get ../../tf || exitcode=$?
+
+# Scale in cluster to zero size
+#
+terraform apply -var "cluster_size_min=\"0\"" -var "cluster_size_max=\"0\"" -var "docker_user=\"$DOCKER_USERNAME\"" -var "docker_pass=\"$DOCKER_PASSWORD\"" ../../tf || exitcode=$?
+asgname=$(grep name terraform.tfvars | awk '{print $3}' | tr -d '"')
+running=$(aws autoscaling describe-auto-scaling-instances | grep AutoScalingGroupName | grep $asgname | wc -l)
+while [ $running -ne 0 ]; do
+  echo 'Waiting for scaled nodes gracefully shutdown'
+  sleep 5
+  running=$(aws autoscaling describe-auto-scaling-instances | grep AutoScalingGroupName | grep $asgname | wc -l)
+done
+
+# Destroy infra
+#
 terraform destroy -force $extraopts ../../tf || exitcode=$?
 terraform remote push
 

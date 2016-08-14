@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# General name for resources
-name=${NAME:-cluster}
-
 # Size (min, max) of cluster
 minsize=$2
 maxsize=$3
@@ -13,6 +10,8 @@ if [ -z $maxsize ]; then maxsize=$minsize; fi
 bucket=${S3BUCKET:-pure-ci}
 # AWS S3 bucket's region
 region=${S3REGION:-eu-west-1}
+# Base name for tfstate file
+name=dockercloud_cluster
 
 usage () {
     echo; echo "Usage: $0 <prod|test> [min_size [max_size]]"; echo
@@ -30,9 +29,10 @@ case "$1" in
     *) usage && die "Unknow argument!" ;;
 esac
 
-if [ -z  $AWS_ACCESS_KEY_ID ];     then die "Please specify AWS credentials - AWS_ACCESS_KEY_ID variable empty"; fi
-if [ -z  $AWS_SECRET_ACCESS_KEY ]; then die "Please specify AWS credentials - AWS_SECRET_ACCESS_KEY variable empty"; fi
-
+if [ -z $AWS_ACCESS_KEY_ID ];     then die "Please specify AWS credentials - AWS_ACCESS_KEY_ID variable empty"; fi
+if [ -z $AWS_SECRET_ACCESS_KEY ]; then die "Please specify AWS credentials - AWS_SECRET_ACCESS_KEY variable empty"; fi
+if [ -z $DOCKER_USERNAME ];       then die "Please specify Docker credential - DOCKER_USERNAME variable empty"; fi
+if [ -z $DOCKER_PASSWORD ];       then die "Please specify Docker credential - DOCKER_PASSWORD variable empty"; fi
 goal=$1
 exitcode=0
 curdir=$(pwd)
@@ -58,7 +58,7 @@ if [ $exitcode -ne 0 ]; then die "terraform can't sync remote state"; fi
 
 # Apply changes
 terraform get ../../tf || exitcode=$?
-terraform apply -var "cluster_size_min=\"$minsize\"" -var "cluster_size_max=\"$maxsize\"" ../../tf || exitcode=$?
+terraform apply -var "cluster_size_min=\"$minsize\"" -var "cluster_size_max=\"$maxsize\"" -var "docker_user=\"$DOCKER_USERNAME\"" -var "docker_pass=\"$DOCKER_PASSWORD\"" ../../tf || exitcode=$?
 terraform remote push || exitcode=$?
 
 if [ $exitcode -ne 0 ]; then die "terraform got error wile apply changes"; fi

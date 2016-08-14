@@ -25,7 +25,7 @@ resource "aws_subnet" "private" {
   availability_zone = "${element(split(",", lookup(var.availibilty_zones, var.region)), count.index)}"
   tags { Name       = "${var.name}-${element(split(",", lookup(var.availibilty_zones, var.region)), count.index)}-private" }
   lifecycle { create_before_destroy = true }
-  map_public_ip_on_launch = false
+  map_public_ip_on_launch = true
 }
 output "private_subnet_ids" {value = "${join(",", aws_subnet.private.*.id)}"}
 
@@ -39,7 +39,7 @@ resource "aws_subnet" "public" {
   availability_zone = "${element(split(",", lookup(var.availibilty_zones, var.region)), count.index)}"
   tags { Name       = "${var.name}-${element(split(",", lookup(var.availibilty_zones, var.region)), count.index)}-public" }
   lifecycle { create_before_destroy = true }
-  map_public_ip_on_launch = false
+  map_public_ip_on_launch = true
 }
 output "public_subnet_ids" {value = "${join(",", aws_subnet.public.*.id)}"}
 
@@ -62,6 +62,7 @@ resource "aws_internet_gateway" "public" {
   tags { Name = "${var.name}-gw-public" }
   lifecycle { create_before_destroy = true }
 }
+output "internet_gw_id" {value = "${aws_internet_gateway.public.id}"}
 
 #
 # Define a NAT Gateway to route all outbound traffic
@@ -81,6 +82,8 @@ resource "aws_route_table" "public" {
   tags { Name  = "${var.name}-table-public" }
   lifecycle { create_before_destroy = true }
 }
+output "public_rtb_id" {value = "${aws_route_table.public.id}"}
+
 resource "aws_route_table_association" "public" {
   count          = "${length(split(",", lookup(var.availibilty_zones, var.region)))}"
   subnet_id      = "${element(aws_subnet.public.*.id, count.index)}"
@@ -97,6 +100,7 @@ resource "aws_route_table" "private" {
   tags { Name = "${var.name}-table-private" }
   lifecycle { create_before_destroy = true }
 }
+output "private_rtb_id" {value = "${aws_route_table.private.id}"}
 
 resource "aws_route_table_association" "private" {
   count          = "${length(split(",", lookup(var.availibilty_zones, var.region)))}"

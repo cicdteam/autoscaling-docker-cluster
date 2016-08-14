@@ -11,3 +11,7 @@ variable "control_ip" {}
 variable "cluster_min" {}
 variable "cluster_max" {}
 variable "cluster_instance" {}
+variable "docker_user" {}
+variable "docker_pass" {}
+variable "route_table" {}
+variable "internet_gateway" {}

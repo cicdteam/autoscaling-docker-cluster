@@ -8,6 +8,7 @@ export AWS_DEFAULT_REGION=${region}
 apt-get -qq update >/dev/null 2>&1
 apt-get -qq install jq rand python-pip unzip >/dev/null 2>&1
 pip install --upgrade awscli >/dev/null 2>&1
+pip install --upgrade docker-cloud >/dev/null 2>&1
 
 #
 # Change instance's dns records in Route53 zone
@@ -67,24 +68,21 @@ hostname $myhost
 aws ec2 create-tags --resources $(curl -sSL http://169.254.169.254/latest/meta-data/instance-id) --tags Key=Name,Value="${cluster}$idx"
 
 #
+# Add route for Public IP to route table (need to Docker Cloud operates)
+#
+aws ec2 create-route --route-table-id ${route_table} --destination-cidr-block $(curl -sSL http://169.254.169.254/latest/meta-data/public-ipv4)/32 --gateway-id ${internet_gateway}
+
+#
 # Install Docker Engine
 #
 curl -sSL https://get.docker.com | sh >/dev/null 2>&1 || echo "problem with docker"
 usermod -aG docker ubuntu
+docker login -u ${docker_user} -p ${docker_pass}
 
 #
-# Install HashiCorp's Consul client and join to cluster
+# Install Docker Cloud Agent
 #
-docker pull consul >/dev/null 2>&1
-docker run \
-  -d \
-  --net=host \
-  --name=consul \
-  -e 'CONSUL_LOCAL_CONFIG={"leave_on_terminate": true}' \
-  consul agent \
-    -bind=$ip \
-    -dc=${region} \
-    -retry-join=${control_ip}
+sh -c "$(docker-cloud node byo | grep curl | sed 's/^[[:space:]]//g')"
 
 
 #########################################################################################
@@ -96,10 +94,12 @@ docker run \
 #                                                                                       #
 # /usr/local/bin/nodedrain                                                              #
 #                                                                                       #
-# What script doing:                                                                   #
+# What script doing:                                                                    #
 #   1. Check AWS SQS Queue for messages from Autoscale Group                            #
-#   2. On message EC2_INSTANCE_TERMINATING for current instance perform:                                         #
+#   2. On message EC2_INSTANCE_TERMINATING for current instance perform:                #
 #     2.1. Delete dns record in AWS Route53 zone                                        #
+#     2.2. Delete route to Publuc IP via internet gateway                               #
+#     2.3. Terminate node in Docker Cloud
 #   3. Complete scale in action                                                         #
 #                                                                                       #
 #########################################################################################
@@ -150,6 +150,8 @@ while true; do
     then
       aws sqs delete-message --queue-url \$qurl --receipt-handle \$receipt >/dev/null 2>&1
       dnsdel
+      aws ec2 delete-route --route-table-id ${route_table} --destination-cidr-block $(curl -sSL http://169.254.169.254/latest/meta-data/public-ipv4)/32
+      docker-cloud node rm \$(cat /etc/dockercloud/agent/dockercloud-agent.conf  | jq '.UUID' | tr -d '"')
       aws autoscaling complete-lifecycle-action --lifecycle-hook-name ${hookname} --auto-scaling-group-name ${asgname} --lifecycle-action-result "CONTINUE" --instance-id \$me
   fi
 done

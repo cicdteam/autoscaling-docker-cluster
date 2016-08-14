@@ -65,6 +65,14 @@ resource "aws_iam_role_policy" "cluster" {
             "Effect": "Allow",
             "Action": "ec2:CreateTags",
             "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:CreateRoute",
+                "ec2:DeleteRoute"
+            ],
+            "Resource": "*"
         }
    ]
 }
