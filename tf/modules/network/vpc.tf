@@ -30,7 +30,7 @@ resource "aws_subnet" "private" {
 output "private_subnet_ids" {value = "${join(",", aws_subnet.private.*.id)}"}
 
 #
-# Define AWS Public Subneta. Each zone has its own subnet
+# Define AWS Public Subnets. Each zone has its own subnet
 #
 resource "aws_subnet" "public" {
   count             = "${length(split(",", lookup(var.availibilty_zones, var.region)))}"
